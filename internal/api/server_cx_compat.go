@@ -42,7 +42,7 @@ func (s *Server) cxCompatibilityMiddleware() gin.HandlerFunc {
 		}
 		if len(values) == 0 {
 			canonical := false
-			if s.cfg.CXCompatibility.Enabled && c.Request.Method == http.MethodPost && (c.Request.URL.Path == "/v1/responses" || c.Request.URL.Path == "/v1/responses/compact") {
+			if s.cfg.CXCompatibility.Enabled && c.Request.Method == http.MethodPost && (c.Request.URL.Path == "/v1/responses" || c.Request.URL.Path == "/v1/responses/compact" || c.Request.URL.Path == "/v1/chat/completions") {
 				var ok bool
 				canonical, ok = s.cxCanonicalAccounts(c, "")
 				if !ok {

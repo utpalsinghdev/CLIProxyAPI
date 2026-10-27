@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/cxcompat"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
@@ -106,7 +107,55 @@ func (s *Server) handleCXModels(c *gin.Context) {
 			}
 		}
 	}
-	c.Data(http.StatusOK, "application/json", response.Payload)
+	payload := response.Payload
+	if !explicit {
+		payload, err = mergeCXProviderModels(payload)
+		if err != nil {
+			writeCXModelsError(c, err)
+			return
+		}
+	}
+	c.Data(http.StatusOK, "application/json", payload)
+}
+
+// Keep Codex CLI's versioned catalog unchanged, but expose all configured providers
+// to OpenAI-compatible clients and the management dashboard.
+func mergeCXProviderModels(raw []byte) ([]byte, error) {
+	var catalog struct {
+		Object string            `json:"object"`
+		Data   []json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &catalog); err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(catalog.Data))
+	for _, item := range catalog.Data {
+		var model struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(item, &model); err != nil {
+			return nil, err
+		}
+		seen[model.ID] = true
+	}
+	added := false
+	for _, model := range registry.GetGlobalRegistry().GetAvailableModels("openai") {
+		id, _ := model["id"].(string)
+		if id == "" || seen[id] || cxRegisteredCodexModel(id) {
+			continue
+		}
+		item, err := json.Marshal(model)
+		if err != nil {
+			return nil, err
+		}
+		catalog.Data = append(catalog.Data, item)
+		seen[id] = true
+		added = true
+	}
+	if !added {
+		return raw, nil
+	}
+	return json.Marshal(catalog)
 }
 
 func writeCXModelsError(c *gin.Context, err error) {
