@@ -14,6 +14,13 @@ import (
 
 func (e *CodexExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*cliproxyauth.Auth, error) {
 	log.Debugf("codex executor: refresh called")
+	if isCXAccountAuth(auth) {
+		refreshed, err := e.prepareCXAccountAuth(ctx, auth, true)
+		if err != nil {
+			return nil, cxAuthUnauthorized(err)
+		}
+		return refreshed, nil
+	}
 	if refreshed, handled, err := helps.RefreshAuthViaHome(ctx, e.cfg, auth); handled {
 		return refreshed, err
 	}

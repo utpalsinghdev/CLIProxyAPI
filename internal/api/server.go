@@ -22,6 +22,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/api/middleware"
 	codexlive "github.com/router-for-me/CLIProxyAPI/v7/internal/client/codex/live"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/cxcompat"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementasset"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/pluginhost"
@@ -52,6 +53,7 @@ type Server struct {
 	// handlers contains the API handlers for processing requests.
 	handlers         *handlers.BaseAPIHandler
 	codexLiveHandler *codexlive.Handler
+	cxAccounts       cxAccountBridge
 
 	// cfg holds the current server configuration.
 	cfg *config.Config
@@ -221,6 +223,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	// subscribe-config heartbeat connection is healthy.
 	engine.Use(s.homeHeartbeatMiddleware())
 	engine.Use(s.exampleAPIKeySafeModeMiddleware())
+	engine.Use(s.cxCompatibilityMiddleware())
 
 	// Setup routes
 	s.setupRoutes()
@@ -272,8 +275,17 @@ func (s *Server) Start() error {
 		return fmt.Errorf("failed to start HTTP server: server not initialized")
 	}
 
+	if err := s.validateCXIngress(); err != nil {
+		return err
+	}
 	addr := s.server.Addr
-	listener, errListen := net.Listen("tcp", addr)
+	var listener net.Listener
+	var errListen error
+	if s.cfg.CXCompatibility.Enabled && s.cfg.CXCompatibility.ProtectedListeners {
+		listener, errListen = cxcompat.ListenProtected(s.cfg.Port)
+	} else {
+		listener, errListen = net.Listen("tcp", addr)
+	}
 	if errListen != nil {
 		return fmt.Errorf("failed to start HTTP server: %v", errListen)
 	}

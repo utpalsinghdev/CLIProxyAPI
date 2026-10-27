@@ -86,7 +86,7 @@ func authSelectionEligibilityForRequest(ctx context.Context, opts cliproxyexecut
 }
 
 func (e authSelectionEligibility) allows(auth *Auth) bool {
-	if auth == nil {
+	if auth == nil || auth.Attributes["request_plan_only"] == "true" {
 		return false
 	}
 	if e.requiredKind != "" && auth.AuthKind() != e.requiredKind {

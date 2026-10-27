@@ -5,6 +5,17 @@ host: ""
 # Server port
 port: 8317
 
+# Optional CX Responses compatibility. Off by default; ordinary API authentication still applies.
+# Enables /health and loopback-only, fixed-payload x-cx-warm-account targeting for Codex OAuth records.
+# Registered Codex-only Responses models use CX's full-history normalization and default streaming.
+# Without source-home, unknown, mixed-provider, and plugin-routed models retain native semantics.
+# Source-home opts into canonical ~/.codex-accounts records and per-request active-account routing.
+# It must be an absolute home directory; leave empty to retain native account ownership.
+# This does not replace CX's auto-switch watcher or account-management CLI.
+cx-compatibility:
+  enabled: false
+  source-home: ""
+
 # TLS settings for HTTPS. When enabled, the server listens with the provided certificate and key.
 tls:
   enable: false

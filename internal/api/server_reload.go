@@ -57,6 +57,15 @@ func (s *Server) UpdateClientsContext(ctx context.Context, cfg *config.Config) b
 	if len(s.oldConfigYaml) > 0 {
 		_ = yaml.Unmarshal(s.oldConfigYaml, &oldCfg)
 	}
+	if oldCfg != nil && oldCfg.CXCompatibility != cfg.CXCompatibility {
+		// Listener exposure and canonical credential ownership are one startup
+		// decision. A live config reload must not broaden either boundary.
+		if s.cfg != nil {
+			s.cfg.CXCompatibility = oldCfg.CXCompatibility
+		}
+		log.Error("CX compatibility settings require a server restart; reload rejected")
+		return false
+	}
 
 	// Update request logger enabled state if it has changed
 	previousRequestLog := false

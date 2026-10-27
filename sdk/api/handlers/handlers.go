@@ -478,6 +478,12 @@ func (h *BaseAPIHandler) GetContextWithCancel(handler interfaces.APIHandler, c *
 	var requestCtx context.Context
 	if c != nil && c.Request != nil {
 		requestCtx = c.Request.Context()
+		if pinnedAuthID := pinnedAuthIDFromContext(requestCtx); pinnedAuthID != "" {
+			parentCtx = WithPinnedAuthID(parentCtx, pinnedAuthID)
+		}
+		if plan, ok := coreauth.RequestAuthPlanFromContext(requestCtx); ok {
+			parentCtx = coreauth.WithRequestAuthPlan(parentCtx, plan)
+		}
 	}
 
 	if requestCtx != nil && logging.GetRequestID(parentCtx) == "" {

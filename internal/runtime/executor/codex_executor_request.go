@@ -97,6 +97,11 @@ type codexIdentityReplacement struct {
 }
 
 func (e *CodexExecutor) cacheHelper(ctx context.Context, from sdktranslator.Format, url string, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, userPayload []byte, rawJSON []byte, headerSets ...http.Header) (*http.Request, []byte, codexIdentityConfuseState, error) {
+	if isCXAccountAuth(auth) {
+		// CX forwards client cache identities unchanged and never invents a key.
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(rawJSON))
+		return httpReq, rawJSON, codexIdentityConfuseState{}, err
+	}
 	var headers http.Header
 	if len(headerSets) > 0 {
 		headers = headerSets[0]

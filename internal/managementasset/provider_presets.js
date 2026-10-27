@@ -9,6 +9,55 @@
   let selecting = false;
   let creating = false;
   let previousSearch = "";
+  let counts = null;
+
+  function isProviderRead(url) {
+    return /\/v0\/management\/(config|openai-compatibility)$/.test(new URL(url, location.href).pathname);
+  }
+
+  // Reuse the panel's authenticated reads; retain counts, never credentials.
+  function readCounts(url, data) {
+    if (!isProviderRead(url)) return;
+    const providers = Array.isArray(data) ? data : data?.["openai-compatibility"];
+    if (!Array.isArray(providers)) return;
+    const resources = providers.filter((provider) => {
+      if (/deepseek/i.test(provider.name || "")) return true;
+      try {
+        return new URL(provider["base-url"] || provider.baseUrl).hostname === "api.deepseek.com";
+      } catch {
+        return false;
+      }
+    });
+    counts = { active: resources.filter((provider) => !provider.disabled).length, total: resources.length };
+    update();
+  }
+
+  const originalOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function (method, url, ...args) {
+    if (String(method).toUpperCase() === "GET" && isProviderRead(url)) {
+      this.addEventListener("load", () => {
+        if (this.status < 200 || this.status >= 300) return;
+        try {
+          readCounts(url, this.responseType === "json" ? this.response : JSON.parse(this.responseText));
+        } catch {
+          // Leave the last successful counts intact if the response is invalid.
+        }
+      }, { once: true });
+    }
+    return originalOpen.call(this, method, url, ...args);
+  };
+
+  const originalFetch = window.fetch;
+  window.fetch = async function (...args) {
+    const response = await originalFetch.apply(this, args);
+    const request = args[0];
+    const method = args[1]?.method || (request instanceof Request ? request.method : "GET");
+    const url = request instanceof Request ? request.url : String(request);
+    if (method.toUpperCase() === "GET" && response.ok && isProviderRead(url)) {
+      response.clone().json().then((data) => readCounts(url, data)).catch(() => {});
+    }
+    return response;
+  };
 
   function fill(input, value) {
     if (input.value === value) return;
@@ -42,8 +91,13 @@
       category.id = categoryID;
       category.querySelectorAll("img").forEach((image) => { image.src = logoURL; });
       category.querySelector('[class*="__itemTitle___"]').textContent = "DeepSeek";
-      category.querySelector('[class*="__itemSubtitle___"]').textContent = "OpenAI-compatible API";
-      category.querySelector('[class*="__badge___"]')?.remove();
+      // Native OpenAI has light/dark logo variants. DeepSeek needs one unfiltered logo.
+      category.querySelectorAll("img").forEach((image, index) => {
+        if (index > 0) image.remove();
+        else image.className = [...image.classList].filter((name) =>
+          !/__(logoThemeLight|logoThemeDark|logoTransparent|logoInvertOnDark)___/.test(name)
+        ).join(" ");
+      });
       category.addEventListener("click", () => {
         if (document.querySelector('[role="dialog"]')) return;
         if (!selected) previousSearch = searchInput()?.value || "";
@@ -54,6 +108,20 @@
         update();
       });
       native.after(category);
+    }
+
+    const subtitle = category.querySelector('[class*="__itemSubtitle___"]');
+    const template = native.querySelector('[class*="__itemSubtitle___"]')?.textContent || "0/0 active";
+    const text = counts ? template.replace(/\d+\s*\/\s*\d+/, `${counts.active}/${counts.total}`) : "…/…";
+    if (subtitle && subtitle.textContent !== text) subtitle.textContent = text;
+    const badge = category.querySelector('[class*="__badge___"]');
+    const total = counts ? String(counts.total) : "…";
+    if (badge && badge.textContent !== total) badge.textContent = total;
+    if (badge) {
+      const emptyClass = [...document.querySelectorAll('[class*="ProviderCategoryList-module__badgeAmber___"]')]
+        .flatMap((element) => [...element.classList])
+        .find((name) => name.includes("__badgeAmber___"));
+      if (emptyClass) badge.classList.toggle(emptyClass, counts?.total === 0);
     }
 
     const activeClass = [...document.querySelectorAll(categorySelector)]

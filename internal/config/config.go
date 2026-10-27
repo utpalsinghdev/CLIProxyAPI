@@ -4,6 +4,18 @@
 // debug settings, proxy configuration, and API keys.
 package config
 
+// CXCompatibilityConfig controls the opt-in CX compatibility surface.
+type CXCompatibilityConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// SourceHome opts into canonical CX account ownership under an explicit home root.
+	// Empty leaves native account storage and routing unchanged.
+	SourceHome string `yaml:"source-home,omitempty" json:"source-home,omitempty"`
+	// ProtectedListeners binds only loopback and local Tailscale interface addresses.
+	ProtectedListeners bool `yaml:"protected-listeners,omitempty" json:"protected-listeners,omitempty"`
+	// Keyless permits CX's original routes without a client key on protected listeners only.
+	Keyless bool `yaml:"keyless,omitempty" json:"keyless,omitempty"`
+}
+
 // Config represents the application's configuration, loaded from a YAML file.
 type Config struct {
 	SDKConfig `yaml:",inline"`
@@ -15,6 +27,9 @@ type Config struct {
 
 	// TLS config controls HTTPS server settings.
 	TLS TLSConfig `yaml:"tls" json:"tls"`
+
+	// CXCompatibility enables the narrowly scoped CX client compatibility endpoints.
+	CXCompatibility CXCompatibilityConfig `yaml:"cx-compatibility" json:"cx-compatibility"`
 
 	// Home config is runtime-only and is populated from -home-jwt.
 	Home HomeConfig `yaml:"-" json:"-"`
