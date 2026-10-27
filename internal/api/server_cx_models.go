@@ -67,6 +67,7 @@ func (s *Server) handleCXModels(c *gin.Context) {
 	}
 	plan := coreauth.RequestAuthPlan{
 		Auths: auths, Model: cxModelsExecutionModel, AllowFallback: cxcompat.AllowFallback,
+		RetryLimit: s.cfg.RequestRetry, AllowRetry: cxcompat.AllowModelRetry,
 	}
 	ctx := coreauth.WithRequestAuthPlan(c.Request.Context(), plan)
 	values, explicit := c.Request.URL.Query()["client_version"]

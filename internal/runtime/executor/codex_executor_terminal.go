@@ -18,6 +18,19 @@ const codexIncompleteStreamMessage = "stream error: stream disconnected before c
 
 type codexIncompleteStreamError struct {
 	statusErr
+	cause     error
+	retryable bool
+}
+
+func (e codexIncompleteStreamError) Unwrap() error { return e.cause }
+
+func (e codexIncompleteStreamError) RetryableBeforeOutput() bool { return e.retryable }
+
+func (e codexIncompleteStreamError) LogDiagnostic() string {
+	if e.cause != nil {
+		return e.Error() + ": " + e.cause.Error()
+	}
+	return e.Error()
 }
 
 func newCodexIncompleteStreamError() codexIncompleteStreamError {

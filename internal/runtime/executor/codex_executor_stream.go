@@ -137,7 +137,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 		}
 		helps.AppendAPIResponseChunk(ctx, e.cfg, data)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), data))
-		err = newCodexStatusErrWithCooling(httpResp.StatusCode, data, e.modelLevelCooling())
+		err = helps.HTTPRejectionError{Err: newCodexStatusErrWithCooling(httpResp.StatusCode, data, e.modelLevelCooling())}
 		return nil, err
 	}
 
@@ -220,7 +220,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 							// transparently retry on another credential, and report the status the
 							// upstream refused to put on the wire.
 							helps.LogWithRequestID(ctx).Debugf("codex executor: bootstrap overload rejection after %d buffered lines, failing over", bufferedFrames)
-							return nil, newCodexBootstrapOverloadErr(terminalBody)
+							return nil, helps.HTTPRejectionError{Err: newCodexBootstrapOverloadErr(terminalBody)}
 						}
 						helps.LogWithRequestID(ctx).Debugf("codex executor: bootstrap overload rejection after %d lines / %v, time budget exhausted; delivering in-stream", bufferedFrames, timeSinceStart)
 					}
@@ -307,20 +307,14 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 
 		if !streamStarted && bootstrapTerminalErr == nil {
 			closeBootstrapBody()
-			if errScan := scanner.Err(); errScan != nil {
-				// A cancelled downstream request must not be recorded as an upstream failure or
-				// penalise the credential; mirror the unbuffered goroutine's guard.
-				if ctx.Err() != nil {
-					return nil, ctx.Err()
-				}
-				helps.RecordAPIResponseError(ctx, e.cfg, errScan)
-				reporter.PublishFailure(ctx, errScan)
-				return nil, errScan
-			}
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
 			streamErr := newCodexIncompleteStreamError()
+			streamErr.cause = scanner.Err()
+			// Only allow replay while the bounded bootstrap still holds exclusively
+			// non-substantive frames. Output and server-side tool events release it.
+			streamErr.retryable = true
 			helps.RecordAPIResponseError(ctx, e.cfg, streamErr)
 			reporter.PublishFailure(ctx, streamErr)
 			return nil, streamErr
@@ -445,6 +439,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 			helps.RecordAPIResponseError(ctx, e.cfg, errScan)
 		}
 		streamErr := newCodexIncompleteStreamError()
+		streamErr.cause = scanner.Err()
 		helps.RecordAPIResponseError(ctx, e.cfg, streamErr)
 		reporter.PublishFailure(ctx, streamErr)
 		select {

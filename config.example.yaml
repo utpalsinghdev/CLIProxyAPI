@@ -11,6 +11,10 @@ port: 8317
 # Without source-home, unknown, mixed-provider, and plugin-routed models retain native semantics.
 # Source-home opts into canonical ~/.codex-accounts records and per-request active-account routing.
 # It must be an absolute home directory; leave empty to retain native account ownership.
+# Canonical requests use request-retry for same-account 502/503/504 recovery.
+# Enable codex.stream-bootstrap-buffering to recover held-preamble disconnects.
+# Released stream payloads are never replayed. Targeted warming never retries.
+# Model discovery GETs may retry transport errors; request-retry: 0 disables it.
 # This does not replace CX's auto-switch watcher or account-management CLI.
 cx-compatibility:
   enabled: false

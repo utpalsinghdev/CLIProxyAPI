@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -16,6 +17,10 @@ type RequestAuthPlan struct {
 	Auths         []*Auth
 	Model         string
 	AllowFallback func(error) bool
+	// RetryLimit bounds additional same-account attempts before a stream is committed.
+	// AllowRetry must explicitly approve each failure; neither field enables account rotation.
+	RetryLimit int
+	AllowRetry func(error) bool
 }
 
 // WithRequestAuthPlan returns a context carrying an independent snapshot of plan auths.
@@ -121,13 +126,26 @@ func (m *Manager) executeRequestAuthPlan(ctx context.Context, plan RequestAuthPl
 				auth = prepared
 			}
 		}
-		start := newUpstreamAttemptContext(attemptCtx)
-		response, err := executor.Execute(start, auth, execReq, execOpts)
-		if err != nil && isUnauthorizedError(err) {
-			if refreshed, ok := m.refreshRequestPlanAuth(newUpstreamAttemptContext(attemptCtx), executor, auth); ok {
-				response, err = executor.Execute(newUpstreamAttemptContext(attemptCtx), refreshed, execReq, execOpts)
-				auth = refreshed
+		var response cliproxyexecutor.Response
+		var err error
+		refreshedAfter401 := false
+		for attempt := 0; ; attempt++ {
+			if ctx != nil && ctx.Err() != nil {
+				err = ctx.Err()
+				break
 			}
+			response, err = executor.Execute(newUpstreamAttemptContext(attemptCtx), auth, execReq, execOpts)
+			if err != nil && isUnauthorizedError(err) && !refreshedAfter401 {
+				refreshedAfter401 = true
+				if refreshed, ok := m.refreshRequestPlanAuth(newUpstreamAttemptContext(attemptCtx), executor, auth); ok {
+					response, err = executor.Execute(newUpstreamAttemptContext(attemptCtx), refreshed, execReq, execOpts)
+					auth = refreshed
+				}
+			}
+			if !plan.canRetry(ctx, err, attempt) {
+				break
+			}
+			m.recordRequestPlanResult(attemptCtx, auth, Result{AuthID: auth.ID, Provider: "codex", Model: plan.Model, RouteModel: plan.Model, Error: resultErrorFromError(err), Options: execOpts}, err)
 		}
 		if err == nil {
 			m.clearPlannedAuthBlock(auth)
@@ -219,24 +237,38 @@ func (m *Manager) executeStreamRequestAuthPlan(ctx context.Context, plan Request
 				auth = prepared
 			}
 		}
-		stream, err := executor.ExecuteStream(streamCtx, auth, execReq, streamOpts)
-
-		if err != nil && isUnauthorizedError(err) {
-			if refreshed, refreshedOK := m.refreshRequestPlanAuth(newUpstreamAttemptContext(streamCtx), executor, auth); refreshedOK {
-				stream, err = executor.ExecuteStream(newUpstreamAttemptContext(streamCtx), refreshed, execReq, streamOpts)
-				auth = refreshed
+		var err error
+		refreshedAfter401 := false
+		for attempt := 0; ; attempt++ {
+			if ctx != nil && ctx.Err() != nil {
+				err = ctx.Err()
+				break
 			}
-		}
-		if err == nil && stream != nil {
-			first, bootstrapErr := firstStreamPayload(ctx, stream.Chunks)
-			if bootstrapErr == nil {
-				stream.Chunks = recordRequestPlanStream(ctx, m, auth, plan.Model, streamOpts, first, stream.Chunks)
-				return stream, nil
+			attemptCtx := newUpstreamAttemptContext(streamCtx)
+			stream, errStream := executor.ExecuteStream(attemptCtx, auth, execReq, streamOpts)
+			err = errStream
+			if err != nil && isUnauthorizedError(err) && !refreshedAfter401 {
+				refreshedAfter401 = true
+				if refreshed, refreshedOK := m.refreshRequestPlanAuth(newUpstreamAttemptContext(streamCtx), executor, auth); refreshedOK {
+					stream, err = executor.ExecuteStream(newUpstreamAttemptContext(streamCtx), refreshed, execReq, streamOpts)
+					auth = refreshed
+				}
 			}
-			err = bootstrapErr
-		}
-		if err == nil {
-			err = fmt.Errorf("Codex executor returned nil stream")
+			if err == nil && stream != nil {
+				first, bootstrapErr := firstStreamPayload(ctx, stream.Chunks)
+				if bootstrapErr == nil {
+					stream.Chunks = recordRequestPlanStream(ctx, m, auth, plan.Model, streamOpts, first, stream.Chunks)
+					return stream, nil
+				}
+				err = bootstrapErr
+			}
+			if err == nil {
+				err = fmt.Errorf("Codex executor returned nil stream")
+			}
+			if !plan.canRetry(ctx, err, attempt) {
+				break
+			}
+			m.recordRequestPlanResult(attemptCtx, auth, Result{AuthID: auth.ID, Provider: "codex", Model: plan.Model, RouteModel: plan.Model, Error: resultErrorFromError(err), Options: streamOpts}, err)
 		}
 		m.recordRequestPlanResult(streamCtx, auth, Result{AuthID: auth.ID, Provider: "codex", Model: plan.Model, RouteModel: plan.Model, Error: resultErrorFromError(err), RetryAfter: retryAfterFromError(err), CredentialScope: isCredentialScopedError(err), Options: streamOpts}, err)
 		lastErr = err
@@ -299,7 +331,15 @@ func (m *Manager) refreshRequestPlanAuth(ctx context.Context, executor ProviderE
 	return updated, true
 }
 
+func (plan RequestAuthPlan) canRetry(ctx context.Context, err error, attempt int) bool {
+	return err != nil && (ctx == nil || ctx.Err() == nil) && attempt < plan.RetryLimit && plan.AllowRetry != nil && plan.AllowRetry(err)
+}
+
 func (m *Manager) recordRequestPlanResult(ctx context.Context, auth *Auth, result Result, err error) {
+	if err != nil && !errors.Is(err, context.Canceled) && (ctx == nil || ctx.Err() == nil) {
+		logEntryWithRequestID(ctx).WithField("provider", "codex").WithField("model", result.Model).
+			WithField("status", statusCodeFromError(err)).Warnf("CX upstream execution failed: %s", safeErrorDiagnosticForLog(err))
+	}
 	if auth != nil {
 		m.recordPlannedAuthFailure(auth, err)
 	}

@@ -34,6 +34,34 @@ func AllowFallback(err error) bool {
 	return false
 }
 
+// AllowRetry approves same-account retries of explicit upstream rejections or a
+// stream failure the executor has certified occurred before meaningful output.
+// Unknown transport errors on POST remain ambiguous and are never replayed.
+func AllowRetry(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var bootstrap interface{ RetryableBeforeOutput() bool }
+	return errors.As(err, &bootstrap) && bootstrap.RetryableBeforeOutput()
+}
+
+// AllowModelRetry also permits transport retries because model discovery is an idempotent GET.
+func AllowModelRetry(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var status interface{ StatusCode() int }
+	if !errors.As(err, &status) {
+		return true
+	}
+	switch status.StatusCode() {
+	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
 func quotaErrorJSON(raw string) bool {
 	if len(raw) > 1<<20 {
 		return false

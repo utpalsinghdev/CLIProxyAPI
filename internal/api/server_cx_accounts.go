@@ -109,6 +109,8 @@ func (s *Server) cxCanonicalAccounts(c *gin.Context, target string) (bool, bool)
 	plan := coreauth.RequestAuthPlan{Auths: auths, Model: model}
 	if target == "" {
 		plan.AllowFallback = cxcompat.AllowFallback
+		plan.RetryLimit = s.cfg.RequestRetry
+		plan.AllowRetry = cxcompat.AllowRetry
 	}
 	ctx := coreauth.WithRequestAuthPlan(c.Request.Context(), plan)
 	c.Request = c.Request.WithContext(ctx)
