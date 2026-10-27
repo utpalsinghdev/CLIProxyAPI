@@ -2,6 +2,8 @@
   "use strict";
 
   const categoryID = "cpa-deepseek-category";
+  const logoURL = "__CPA_DEEPSEEK_LOGO__";
+  const originalLogos = new WeakMap();
   const categorySelector = 'button[class*="ProviderCategoryList-module__item___"]';
   let selected = false;
   let selecting = false;
@@ -38,7 +40,7 @@
     if (!category) {
       category = native.cloneNode(true);
       category.id = categoryID;
-      category.querySelectorAll("img").forEach((image) => image.remove());
+      category.querySelectorAll("img").forEach((image) => { image.src = logoURL; });
       category.querySelector('[class*="__itemTitle___"]').textContent = "DeepSeek";
       category.querySelector('[class*="__itemSubtitle___"]').textContent = "OpenAI-compatible API";
       category.querySelector('[class*="__badge___"]')?.remove();
@@ -62,6 +64,17 @@
       if (selected) native.classList.remove(activeClass);
     }
     category.setAttribute("aria-pressed", String(selected));
+    document.querySelectorAll('img[class*="ProviderResourcePanel-module__logo___"]').forEach((image) => {
+      if (selected) {
+        if (image.getAttribute("src") !== logoURL) {
+          originalLogos.set(image, image.getAttribute("src"));
+          image.src = logoURL;
+        }
+      } else if (image.getAttribute("src") === logoURL && originalLogos.has(image)) {
+        image.src = originalLogos.get(image);
+        originalLogos.delete(image);
+      }
+    });
     if (!selected) return;
 
     const heading = document.querySelector('[class*="ProviderResourcePanel"] h2');
